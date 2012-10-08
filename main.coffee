@@ -1,68 +1,33 @@
-events = require('events')
 https = require('https')
 util = require('util')
+Worker = require('./workers').Worker
 
 argv = require('optimist')
-        .usage('Usage: $0 -c [concurrent users] -n [num of reqs]')
-        .demand(['c', 'n'])
+        .usage('Usage: $0 -c [concurrent users] -n [num of reqs] -w [num of workers]')
+        .demand(['c', 'n', 'w'])
         .argv;
 
 
 pool_size = argv.c;
 requests = argv.n;
-https.globalAgent.maxSockets = pool_size;
-
-class Worker
-    constructor: (@master) ->
-
-    preRequest: ->
-        @master.requests--
-
-    postRequest: (stat) ->
-        @master.stats(stat)
-        if @master.requests > 0
-            @go()
-        else
-            @master.workerDone()
-
-    go: ->
-        @preRequest()
-        start =
-        stat = {
-            'res_time': null,
-            'status': null
-        }
-
-        options = {
-            host: 'addons.allizom.org',
-            path: '/en-US/firefox/'
-        }
-
-        req = https.request options, (res) =>
-                                res.on 'end', =>
-                                    stat.res_time = Date.now() - start
-                                    stat.status = res.statusCode
-                                    @postRequest(stat)
-
-
-        req.on 'socket', -> start = Date.now()
-
-        req.end()
+workers = argv.w;
+https.globalAgent.maxSockets = pool_size * workers;
 
 
 class LoadTest
-    constructor: (@requests, @pool_size) ->
-        @running = 0
+    constructor: (@requests, @pool_size, @workers) ->
+        @running_workers = []
 
     stats: (stat) ->
         @req_stats.push(stat)
         @good_requests++
 
     workerDone: ->
-        @running--
-        
-        if @running <= 0
-            @end()
+        for w in @running_workers
+            if not w.done
+                return
+
+        @end()
          
     end: ->
         elapsed_s = (Date.now() - @start) / 1000
@@ -78,13 +43,13 @@ class LoadTest
         @good_requests = 0
         @req_stats = []
 
-        for i in [0..@pool_size]
-            @running++
-            w = new Worker(@)
+        for i in [1..@workers]
+            w = new Worker(@, @pool_size)
+            @running_workers.push w
             w.go()
         
         return
 
 
-l = new LoadTest(requests, pool_size)
+l = new LoadTest(requests, pool_size, workers)
 l.run()

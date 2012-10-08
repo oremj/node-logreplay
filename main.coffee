@@ -18,14 +18,14 @@ class Worker
     preRequest: ->
         @master.requests--
 
-    postRequest: ->
+    postRequest: (stat) ->
+        @master.stats(stat)
         if @master.requests > 0
             @go()
         else
             @master.workerDone()
 
     go: ->
-        self = @
         @preRequest()
         start =
         stat = {
@@ -34,16 +34,15 @@ class Worker
         }
 
         options = {
-            host: 'addons-dev.allizom.org',
-            path: '/media/updater.output.txt'
+            host: 'addons.allizom.org',
+            path: '/en-US/firefox/'
         }
 
-        req = https.request options, (res) ->
-                                res.on 'end', ->
+        req = https.request options, (res) =>
+                                res.on 'end', =>
                                     stat.res_time = Date.now() - start
                                     stat.status = res.statusCode
-                                    self.master.stats(stat)
-                                    self.postRequest()
+                                    @postRequest(stat)
 
 
         req.on 'socket', -> start = Date.now()

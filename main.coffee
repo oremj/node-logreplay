@@ -16,6 +16,7 @@ https.globalAgent.maxSockets = pool_size;
 class LoadTest
     constructor: (@requests, @pool_size) ->
         @running = 0
+        @req_stats = []
 
     doRequest: (callback) ->
         start =
@@ -36,24 +37,19 @@ class LoadTest
                                     callback(stats)
 
 
-        req.on('socket', ->
-            start = Date.now()
-        )
+        req.on 'socket', -> start = Date.now()
 
         req.end()
         
     end: ->
         elapsed_s = (Date.now() - @start) / 1000
-        console.info("%d Reqs/sec", @good_requests / elapsed_s)
 
-    run: ->
-        @start = Date.now()
-        @good_requests = 0
+        sum = 0
+        sum += stat.res_time for stat in @req_stats
+        avg_req_time = sum / @good_requests
 
-        for i in [0..@pool_size]
-            @next()
+        console.info("%d conn/s (%d ms/conn)", @good_requests / elapsed_s, avg_req_time)
 
-    
     next: ->
         self = @
         if @requests <= 0
@@ -64,12 +60,21 @@ class LoadTest
         @requests--
         @running++
 
-        @doRequest((stats) ->
+        @doRequest (stats) ->
             console.info("Request took: %dms and returned %s", stats.res_time, stats.status)
+            self.req_stats.push(stats)
             self.good_requests++
             self.running--
             self.next()
-        )
+
+    run: ->
+        @start = Date.now()
+        @good_requests = 0
+
+        for i in [0..@pool_size]
+            @next()
+        
+        return
 
 
 l = new LoadTest(requests, pool_size)

@@ -12,35 +12,59 @@ pool_size = argv.c;
 requests = argv.n;
 https.globalAgent.maxSockets = pool_size;
 
+class Worker
+    constructor: (@master) ->
 
-class LoadTest
-    constructor: (@requests, @pool_size) ->
-        @running = 0
-        @req_stats = []
+    preRequest: ->
+        @master.requests--
 
-    doRequest: (callback) ->
+    postRequest: ->
+        if @master.requests > 0
+            @go()
+        else
+            @master.workerDone()
+
+    go: ->
+        self = @
+        @preRequest()
         start =
-        stats = {
+        stat = {
             'res_time': null,
             'status': null
         }
 
         options = {
             host: 'addons-dev.allizom.org',
-            path: '/en-US/firefox/'
+            path: '/media/updater.output.txt'
         }
 
         req = https.request options, (res) ->
                                 res.on 'end', ->
-                                    stats.res_time = Date.now() - start
-                                    stats.status = res.statusCode
-                                    callback(stats)
+                                    stat.res_time = Date.now() - start
+                                    stat.status = res.statusCode
+                                    self.master.stats(stat)
+                                    self.postRequest()
 
 
         req.on 'socket', -> start = Date.now()
 
         req.end()
+
+
+class LoadTest
+    constructor: (@requests, @pool_size) ->
+        @running = 0
+
+    stats: (stat) ->
+        @req_stats.push(stat)
+        @good_requests++
+
+    workerDone: ->
+        @running--
         
+        if @running <= 0
+            @end()
+         
     end: ->
         elapsed_s = (Date.now() - @start) / 1000
 
@@ -50,29 +74,15 @@ class LoadTest
 
         console.info("%d conn/s (%d ms/conn)", @good_requests / elapsed_s, avg_req_time)
 
-    next: ->
-        self = @
-        if @requests <= 0
-            if @running == 0
-                @end()
-            return
-
-        @requests--
-        @running++
-
-        @doRequest (stats) ->
-            console.info("Request took: %dms and returned %s", stats.res_time, stats.status)
-            self.req_stats.push(stats)
-            self.good_requests++
-            self.running--
-            self.next()
-
     run: ->
         @start = Date.now()
         @good_requests = 0
+        @req_stats = []
 
         for i in [0..@pool_size]
-            @next()
+            @running++
+            w = new Worker(@)
+            w.go()
         
         return
 
